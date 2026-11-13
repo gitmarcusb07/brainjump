@@ -19,6 +19,12 @@ namespace BrainJump
         public int[] options;
         public int correctIndex;
         public QuestionCategory category;
+
+        /// <summary>
+        /// True when the question asks for a missing operand (for example "12 - ? = 7")
+        /// rather than the result. Normal questions leave this false.
+        /// </summary>
+        public bool isMissingNumber;
     }
 
     public static class QuestionGenerator
@@ -230,6 +236,140 @@ namespace BrainJump
                 T temp = items[i];
                 items[i] = items[swapIndex];
                 items[swapIndex] = temp;
+            }
+        }
+
+        private static QuestionData CreateMissingNumberQuestion(
+            string questionText,
+            int correctAnswer,
+            QuestionCategory category)
+        {
+            QuestionData q = CreateQuestion(questionText, correctAnswer, category);
+            q.isMissingNumber = true;
+            return q;
+        }
+
+        /// <summary>
+        /// Generates a question appropriate for the given world (0..2) and level (0..9).
+        /// World 0 is addition, world 1 is subtraction and world 2 is multiplication/division;
+        /// worlds 1 and 2 introduce missing-number questions from level 4 onwards.
+        /// If the resulting question text matches the previous question, another question is
+        /// generated for up to 10 attempts, after which the last generated question is returned.
+        /// </summary>
+        /// <param name="world">World index, clamped to 0..2.</param>
+        /// <param name="level">Level index within the world, clamped to 0..9.</param>
+        /// <param name="previousQuestionText">Text of the previously shown question, or null/empty.</param>
+        /// <returns>The generated question.</returns>
+        public static QuestionData GenerateForLevel(int world, int level, string previousQuestionText)
+        {
+            world = Mathf.Clamp(world, 0, 2);
+            level = Mathf.Clamp(level, 0, 9);
+
+            QuestionData generated = null;
+
+            for (int attempt = 0; attempt < AttemptsToAvoidRepeat; attempt++)
+            {
+                generated = GenerateOneForLevel(world, level);
+
+                if (string.IsNullOrEmpty(previousQuestionText) ||
+                    generated.questionText != previousQuestionText)
+                {
+                    return generated;
+                }
+            }
+
+            // After the retry limit, accept the final generated question.
+            return generated;
+        }
+
+        private static QuestionData GenerateOneForLevel(int world, int level)
+        {
+            switch (world)
+            {
+                case 1:
+                {
+                    // Subtraction Hills.
+                    if (level >= 4 && Random.value < 0.5f)
+                    {
+                        int ma = Random.Range(8, 12 + level * 3 + 1);
+                        int mb = Random.Range(2, ma);
+                        int result = ma - mb;
+
+                        return CreateMissingNumberQuestion(
+                            $"{ma} - ? = {result}",
+                            mb,
+                            QuestionCategory.Subtraction);
+                    }
+
+                    int a = Random.Range(5, 10 + level * 3 + 1);
+
+                    // Upper bound is exclusive, so b is selected from [2, a - 1].
+                    int b = Random.Range(2, a);
+
+                    return CreateQuestion(
+                        $"{a} - {b} = ?",
+                        a - b,
+                        QuestionCategory.Subtraction);
+                }
+
+                case 2:
+                {
+                    // Multiplication Peaks.
+                    if (level >= 4 && Random.value < 0.5f)
+                    {
+                        if (Random.value < 0.5f)
+                        {
+                            int ma = Random.Range(2, 10);
+                            int mb = Random.Range(2, 10);
+
+                            return CreateMissingNumberQuestion(
+                                $"{ma} × ? = {ma * mb}",
+                                mb,
+                                QuestionCategory.Multiplication);
+                        }
+
+                        int mDivisor = Random.Range(2, 10);
+                        int mQuotient = Random.Range(2, 3 + level + 1);
+                        int mDividend = mDivisor * mQuotient;
+
+                        return CreateMissingNumberQuestion(
+                            $"{mDividend} ÷ ? = {mQuotient}",
+                            mDivisor,
+                            QuestionCategory.Division);
+                    }
+
+                    if (Random.value < 0.5f)
+                    {
+                        int a = Random.Range(2, 3 + level / 2 + 1);
+                        int b = Random.Range(2, 10);
+
+                        return CreateQuestion(
+                            $"{a} × {b} = ?",
+                            a * b,
+                            QuestionCategory.Multiplication);
+                    }
+
+                    int divisor = Random.Range(2, 10);
+                    int quotient = Random.Range(2, 3 + level + 1);
+                    int dividend = divisor * quotient;
+
+                    return CreateQuestion(
+                        $"{dividend} ÷ {divisor} = ?",
+                        quotient,
+                        QuestionCategory.Division);
+                }
+
+                default:
+                {
+                    // Addition Meadows (world 0).
+                    int a = Random.Range(2, 5 + level * 2 + 1);
+                    int b = Random.Range(2, 5 + level * 2 + 1);
+
+                    return CreateQuestion(
+                        $"{a} + {b} = ?",
+                        a + b,
+                        QuestionCategory.Addition);
+                }
             }
         }
     }

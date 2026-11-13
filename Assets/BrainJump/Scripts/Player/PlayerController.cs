@@ -4,8 +4,9 @@ namespace BrainJump
 {
     /// <summary>
     /// Physics-based player movement for BrainJump.
-    /// Handles keyboard and joystick input, jumping, ground/landing detection,
-    /// fall detection, respawning, and freeze control from the GameManager.
+    /// Handles keyboard and joystick input, jumping (including the Double Jump power-up),
+    /// ground/landing detection, moving-platform carry, fall detection, respawning,
+    /// and freeze control from the GameManager.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     [RequireComponent(typeof(CapsuleCollider))]
@@ -36,6 +37,7 @@ namespace BrainJump
         private bool _wasGrounded;
         private bool _fallReported;
         private bool _frozen;
+        private AnswerPlatform _groundedPlatform;
 
         public bool IsGrounded { get; private set; }
 
@@ -85,6 +87,11 @@ namespace BrainJump
             _currentInput = _frozen ? Vector2.zero : Vector2.ClampMagnitude(effectiveInput, 1f);
 
             UpdateGrounded();
+
+            if (_characterAnimator != null && _rigidbody != null)
+            {
+                _characterAnimator.SetFalling(!IsGrounded && _rigidbody.velocity.y < -1f);
+            }
 
             if (!_frozen && Input.GetKeyDown(KeyCode.Space))
             {
@@ -138,6 +145,16 @@ namespace BrainJump
             Vector3 currentVelocity = _rigidbody.velocity;
             _rigidbody.velocity = new Vector3(desiredVelocity.x, currentVelocity.y, desiredVelocity.z);
 
+            // Moving-platform carry: follow the platform the player is standing on.
+            if (IsGrounded && _groundedPlatform != null)
+            {
+                Vector3 delta = _groundedPlatform.FrameDelta;
+                if (delta.sqrMagnitude > 0.000001f)
+                {
+                    transform.position += delta;
+                }
+            }
+
             float inputMagnitude = _currentInput.magnitude;
             if (inputMagnitude > 0.1f)
             {
@@ -164,11 +181,13 @@ namespace BrainJump
         }
 
         /// <summary>
-        /// Requests a jump. Ignored unless the game is playing and the player is grounded.
+        /// Requests a jump. Ignored unless the game is playing. When grounded a normal jump is
+        /// performed; when airborne a single air jump is allowed only if the Double Jump
+        /// power-up is available (it is consumed on use).
         /// </summary>
         public void Jump()
         {
-            if (_frozen || !IsGrounded || _rigidbody == null)
+            if (_frozen || _rigidbody == null)
             {
                 return;
             }
@@ -176,6 +195,22 @@ namespace BrainJump
             GameManager gameManager = GameManager.Instance;
             if (gameManager == null || gameManager.State != GameManager.GameState.Playing)
             {
+                return;
+            }
+
+            if (!IsGrounded)
+            {
+                // Air jump: only when the Double Jump power-up is available (it is consumed on use).
+                if (PowerUpManager.Instance != null && PowerUpManager.Instance.ConsumeDoubleJump())
+                {
+                    Vector3 airVelocity = _rigidbody.velocity;
+                    airVelocity.y = jumpVelocity;
+                    _rigidbody.velocity = airVelocity;
+
+                    AudioManager.Instance?.PlayJump();
+                    _characterAnimator?.OnJump();
+                }
+
                 return;
             }
 
@@ -191,7 +226,8 @@ namespace BrainJump
         }
 
         /// <summary>
-        /// Raycasts below the capsule to update grounded state and detect landings.
+        /// Raycasts below the capsule to update grounded state, track the platform
+        /// being stood on, and detect landings.
         /// </summary>
         private void UpdateGrounded()
         {
@@ -206,12 +242,9 @@ namespace BrainJump
             float checkDistance = halfHeight + groundCheckDistance;
             Vector3 rayOrigin = transform.position + Vector3.up * (halfHeight + 0.1f);
 
-            IsGrounded = Physics.Raycast(
-                rayOrigin,
-                Vector3.down,
-                checkDistance,
-                groundLayers,
-                QueryTriggerInteraction.Ignore);
+            RaycastHit hit;
+            IsGrounded = Physics.Raycast(rayOrigin, Vector3.down, out hit, checkDistance, groundLayers);
+            _groundedPlatform = IsGrounded && hit.collider != null ? hit.collider.GetComponent<AnswerPlatform>() : null;
 
             float verticalVelocity = _rigidbody != null ? _rigidbody.velocity.y : 0f;
 
@@ -255,6 +288,7 @@ namespace BrainJump
             _fallReported = false;
             _wasGrounded = false;
             IsGrounded = false;
+            _groundedPlatform = null;
             _currentInput = Vector2.zero;
             _joystickInput = Vector2.zero;
 

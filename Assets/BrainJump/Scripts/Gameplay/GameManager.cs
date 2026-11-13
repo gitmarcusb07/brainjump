@@ -5,8 +5,10 @@ namespace BrainJump
 {
     /// <summary>
     /// Central gameplay orchestrator for BrainJump.
-    /// Owns the high-level flow state machine (Menu -> Playing -> Paused / Failed / Complete)
-    /// and coordinates the other managers (questions, timer, UI, audio, progression, player).
+    /// Owns the high-level flow state machine
+    /// (Menu / LevelSelect -> Playing -> Paused / Failed / Complete / GameOver)
+    /// and coordinates the other managers (questions, timer, UI, audio, progression, player,
+    /// score, lives, coins, power-ups and effects).
     ///
     /// Single-scene prototype singleton: the first instance wins, duplicates are destroyed and
     /// no DontDestroyOnLoad is used. Every serialized reference is null-guarded so a partially
@@ -21,7 +23,11 @@ namespace BrainJump
             Playing,
             Paused,
             Failed,
-            Complete
+            Complete,
+            /// <summary>The level select screen is open.</summary>
+            LevelSelect,
+            /// <summary>All hearts were lost; the run is over.</summary>
+            GameOver
         }
 
         /// <summary>The single active instance (null when no GameManager exists).</summary>
@@ -42,12 +48,20 @@ namespace BrainJump
         [SerializeField] private Transform playerSpawnPoint;
 
         [Header("Timing")]
-        [Tooltip("Seconds the player has to answer a single question.")]
+        [Tooltip("Seconds the player has to answer a single question (serialized fallback; per-level limits are computed from the level index).")]
         [SerializeField] private float questionTimeLimit = 10f;
         [Tooltip("Delay between a correct answer and the next question / level complete screen.")]
         [SerializeField] private float nextQuestionDelay = 1.4f;
         [Tooltip("Delay between a failed answer and the fail screen (lets the explosion play).")]
         [SerializeField] private float failDelay = 0.6f;
+
+        [Header("Meta Managers")]
+        [SerializeField] private ScoreManager scoreManager;
+        [SerializeField] private LivesManager livesManager;
+        [SerializeField] private CoinManager coinManager;
+        [SerializeField] private PowerUpManager powerUpManager;
+        [SerializeField] private EffectsManager effectsManager;
+        [SerializeField] private LevelSelectUI levelSelectUI;
 
         /// <summary>Current flow state.</summary>
         public GameState State { get; private set; } = GameState.Menu;
@@ -60,6 +74,18 @@ namespace BrainJump
 
         /// <summary>Questions required to complete one level.</summary>
         public int QuestionsTotal => GameProgression.QuestionsPerLevel;
+
+        /// <summary>Zero-based world index of the current level (0 when progression is not wired).</summary>
+        public int CurrentWorld => progression != null ? progression.World : 0;
+
+        /// <summary>Zero-based level index inside the current world (0 when progression is not wired).</summary>
+        public int CurrentLevel => progression != null ? progression.Level : 0;
+
+        /// <summary>
+        /// Seconds per question for the current level: starts at 10s and shrinks by 0.25s per
+        /// level, never dropping below 6s.
+        /// </summary>
+        private float LevelTimeLimit => Mathf.Max(6f, 10f - (CurrentWorld * 10 + CurrentLevel) * 0.25f);
 
         /// <summary>
         /// Position the player is placed at. Falls back to the player's current position and
@@ -106,6 +132,8 @@ namespace BrainJump
                 gameTimer.OnTick += OnTimerTick; // Drives the HUD countdown.
             }
 
+            if (powerUpManager != null) powerUpManager.OnPowerUpGranted += OnPowerUpGranted;
+
             SetState(GameState.Menu);
 
             if (uiManager != null)
@@ -121,6 +149,8 @@ namespace BrainJump
                 gameTimer.OnTimeout -= OnTimerTimeout;
                 gameTimer.OnTick -= OnTimerTick;
             }
+
+            if (powerUpManager != null) powerUpManager.OnPowerUpGranted -= OnPowerUpGranted;
 
             // Safety net: never leave the game (or the editor) with a frozen clock after teardown.
             Time.timeScale = 1f;
@@ -166,6 +196,24 @@ namespace BrainJump
 
             // AudioManager exposes a static accessor, so it can be resolved without a scene search.
             if (audioManager == null) audioManager = AudioManager.Instance;
+
+            if (scoreManager == null) scoreManager = GetComponentInChildren<ScoreManager>(true);
+            if (scoreManager == null) scoreManager = FindFirstObjectByType<ScoreManager>();
+
+            if (livesManager == null) livesManager = GetComponentInChildren<LivesManager>(true);
+            if (livesManager == null) livesManager = FindFirstObjectByType<LivesManager>();
+
+            if (coinManager == null) coinManager = GetComponentInChildren<CoinManager>(true);
+            if (coinManager == null) coinManager = FindFirstObjectByType<CoinManager>();
+
+            if (powerUpManager == null) powerUpManager = GetComponentInChildren<PowerUpManager>(true);
+            if (powerUpManager == null) powerUpManager = FindFirstObjectByType<PowerUpManager>();
+
+            if (effectsManager == null) effectsManager = GetComponentInChildren<EffectsManager>(true);
+            if (effectsManager == null) effectsManager = FindFirstObjectByType<EffectsManager>();
+
+            if (levelSelectUI == null) levelSelectUI = GetComponentInChildren<LevelSelectUI>(true);
+            if (levelSelectUI == null) levelSelectUI = FindFirstObjectByType<LevelSelectUI>();
         }
 
         /// <summary>Logs a warning for each essential reference that is still missing.</summary>
@@ -176,6 +224,12 @@ namespace BrainJump
             WarnIfNull(uiManager, nameof(uiManager));
             WarnIfNull(progression, nameof(progression));
             WarnIfNull(player, nameof(player));
+            WarnIfNull(scoreManager, nameof(scoreManager));
+            WarnIfNull(livesManager, nameof(livesManager));
+            WarnIfNull(coinManager, nameof(coinManager));
+            WarnIfNull(powerUpManager, nameof(powerUpManager));
+            WarnIfNull(effectsManager, nameof(effectsManager));
+            // levelSelectUI is optional in the prototype scene - no warning.
         }
 
         private void WarnIfNull(UnityEngine.Object reference, string fieldName)
@@ -202,7 +256,13 @@ namespace BrainJump
             PlayerController pc,
             CharacterAnimator ca,
             CameraFollow cam,
-            Transform spawn)
+            Transform spawn,
+            ScoreManager sm,
+            LivesManager lm,
+            CoinManager cm,
+            PowerUpManager pum,
+            EffectsManager em,
+            LevelSelectUI lsu)
         {
             if (qm != null) questionManager = qm;
             if (gt != null) gameTimer = gt;
@@ -213,6 +273,12 @@ namespace BrainJump
             if (ca != null) characterAnimator = ca;
             if (cam != null) cameraFollow = cam;
             if (spawn != null) playerSpawnPoint = spawn;
+            if (sm != null) scoreManager = sm;
+            if (lm != null) livesManager = lm;
+            if (cm != null) coinManager = cm;
+            if (pum != null) powerUpManager = pum;
+            if (em != null) effectsManager = em;
+            if (lsu != null) levelSelectUI = lsu;
         }
 
         // ---------------------------------------------------------------------
@@ -229,12 +295,33 @@ namespace BrainJump
         // Run flow
         // ---------------------------------------------------------------------
 
-        /// <summary>Starts a fresh run from the menu / results screen.</summary>
+        /// <summary>Starts a fresh run at the highest unlocked level (menu / results screen).</summary>
         public void StartGame()
+        {
+            int levelIndex = SaveManager.HighestUnlockedLevel;
+            StartLevel(levelIndex / 10, levelIndex % 10);
+        }
+
+        /// <summary>
+        /// Starts the given level from scratch: resets progression, score, lives, coins and
+        /// power-ups, respawns the player and starts the first question with the level's timer.
+        /// </summary>
+        /// <param name="world">Zero-based world index.</param>
+        /// <param name="level">Zero-based level index inside the world.</param>
+        public void StartLevel(int world, int level)
         {
             Time.timeScale = 1f;
 
-            if (progression != null) progression.ResetProgress();
+            if (progression != null)
+            {
+                progression.ResetProgress();
+                progression.SetLevel(world, level);
+            }
+
+            if (scoreManager != null) scoreManager.ResetScore();
+            if (livesManager != null) livesManager.ResetLives();
+            if (coinManager != null) coinManager.ResetCoins();
+            if (powerUpManager != null) powerUpManager.ResetPowerUps();
 
             if (player != null)
             {
@@ -254,8 +341,59 @@ namespace BrainJump
 
             SetState(GameState.Playing);
 
-            if (questionManager != null) questionManager.NewQuestion();
-            if (gameTimer != null) gameTimer.StartTimer(questionTimeLimit);
+            if (questionManager != null)
+            {
+                questionManager.SetLevel(world, level);
+                questionManager.NewQuestion();
+
+                // Moving platforms from World 2 onward (world index >= 1): slow sideways drift.
+                if (questionManager.AnswerPlatforms != null)
+                {
+                    bool moving = world >= 1;
+                    float amplitude = world >= 2 ? 0.8f : 0.5f;
+                    float speed = world >= 2 ? 1.1f : 0.7f;
+
+                    foreach (AnswerPlatform platform in questionManager.AnswerPlatforms)
+                    {
+                        if (platform != null) platform.SetMoving(moving, amplitude, speed);
+                    }
+                }
+            }
+
+            if (gameTimer != null) gameTimer.StartTimer(LevelTimeLimit);
+
+            PlayClickSound();
+        }
+
+        /// <summary>
+        /// Starts the next level after the current one (used by the level complete screen).
+        /// On the final level, opens the level select screen instead.
+        /// </summary>
+        public void NextLevel()
+        {
+            int nextIndex = CurrentWorld * 10 + CurrentLevel + 1;
+
+            if (nextIndex >= SaveManager.TotalLevels)
+            {
+                OpenLevelSelect();
+                return;
+            }
+
+            StartLevel(nextIndex / 10, nextIndex % 10);
+        }
+
+        /// <summary>
+        /// Opens the level select screen. Only allowed from the menu, the level complete screen
+        /// or the game over screen.
+        /// </summary>
+        public void OpenLevelSelect()
+        {
+            if (State != GameState.Menu && State != GameState.Complete && State != GameState.GameOver) return;
+
+            SetState(GameState.LevelSelect);
+
+            if (levelSelectUI != null) levelSelectUI.Build();
+            if (uiManager != null) uiManager.ShowLevelSelect();
 
             PlayClickSound();
         }
@@ -274,13 +412,21 @@ namespace BrainJump
             {
                 if (progression != null) progression.RegisterCorrect();
 
+                if (scoreManager != null) scoreManager.RegisterCorrect();
+
+                if (effectsManager != null)
+                {
+                    effectsManager.PlayConfetti(platform.transform.position);
+                    effectsManager.FovKick(6f);
+                }
+
                 platform.ShowCorrect();
                 if (audioManager != null) audioManager.PlayCorrect();
                 if (characterAnimator != null) characterAnimator.OnCelebrate();
 
                 if (uiManager != null)
                 {
-                    uiManager.SetScore(CorrectCount);
+                    uiManager.SetScore(scoreManager != null ? scoreManager.Score : CorrectCount);
                     uiManager.SetProgress(CorrectCount, QuestionsTotal);
                 }
 
@@ -291,6 +437,13 @@ namespace BrainJump
             }
             else
             {
+                // A shield absorbs the mistake entirely.
+                if (powerUpManager != null && powerUpManager.ConsumeShield())
+                {
+                    ShieldSaved(platform);
+                    return;
+                }
+
                 // Wrong-answer feedback (red flash, explosion, fail panel) is fully handled by
                 // FailQuestion so the sequence stays identical for timeouts and falls.
                 FailQuestion("Wrong answer!");
@@ -301,6 +454,13 @@ namespace BrainJump
         public void OnTimerTimeout()
         {
             if (State != GameState.Playing) return;
+
+            if (powerUpManager != null && powerUpManager.ConsumeShield())
+            {
+                ShieldSaved(null);
+                return;
+            }
+
             FailQuestion("Time ran out!");
         }
 
@@ -308,6 +468,13 @@ namespace BrainJump
         public void OnPlayerFell()
         {
             if (State != GameState.Playing) return;
+
+            if (powerUpManager != null && powerUpManager.ConsumeShield())
+            {
+                ShieldSaved(null);
+                return;
+            }
+
             FailQuestion("You fell off!");
         }
 
@@ -322,8 +489,33 @@ namespace BrainJump
         }
 
         /// <summary>
-        /// Shared failure path: freezes the player, plays the explosion and shows the fail panel
-        /// after <see cref="failDelay"/> seconds. The mistake is counted exactly once here.
+        /// A shield absorbed a failure: shows feedback and retries the question after a short beat
+        /// without costing a heart or a mistake.
+        /// </summary>
+        private void ShieldSaved(AnswerPlatform platform)
+        {
+            // Prevent a second timeout / fall from firing during the short retry beat.
+            if (gameTimer != null) gameTimer.StopTimer();
+            if (player != null) player.Freeze(true);
+
+            if (platform != null) platform.ShowWrong();
+            if (audioManager != null) audioManager.PlayPowerUp();
+
+            if (effectsManager != null && player != null)
+            {
+                effectsManager.ShowPopup(
+                    "Shield saved you!",
+                    player.transform.position + Vector3.up * 2f,
+                    new Color(0.298f, 0.588f, 0.439f));
+            }
+
+            StartCoroutine(DelayedAction(1.0f, RestartQuestion));
+        }
+
+        /// <summary>
+        /// Shared failure path: freezes the player, plays the dizzy animation and shows the fail panel
+        /// (or the explosion and the game over screen when the last heart is lost) after <see cref="failDelay"/>
+        /// seconds. The mistake is counted exactly once here.
         /// </summary>
         private void FailQuestion(string reason)
         {
@@ -331,20 +523,54 @@ namespace BrainJump
 
             if (gameTimer != null) gameTimer.StopTimer();
             if (progression != null) progression.RegisterMistake();
+            if (scoreManager != null) scoreManager.RegisterMistake();
+
+            bool gameOver = livesManager != null && livesManager.LoseHeart();
 
             if (audioManager != null)
             {
                 audioManager.PlayWrong();
-                audioManager.PlayExplosion();
+                if (gameOver) audioManager.PlayExplosion();
             }
 
-            if (characterAnimator != null) characterAnimator.OnExplode();
+            if (gameOver)
+            {
+                if (characterAnimator != null) characterAnimator.OnExplode();
+            }
+            else if (characterAnimator != null)
+            {
+                characterAnimator.OnDizzy();
+            }
             if (player != null) player.Freeze(true);
 
-            StartCoroutine(DelayedAction(failDelay, () =>
+            if (gameOver)
             {
-                if (uiManager != null) uiManager.ShowFail(reason);
-            }));
+                if (effectsManager != null && player != null) effectsManager.PlayExplosion(player.transform.position);
+                StartCoroutine(DelayedAction(failDelay, GameOver));
+            }
+            else
+            {
+                StartCoroutine(DelayedAction(failDelay, () =>
+                {
+                    if (uiManager != null) uiManager.ShowFail(reason);
+                }));
+            }
+        }
+
+        /// <summary>All hearts lost: ends the run, stores the best score and shows game over.</summary>
+        private void GameOver()
+        {
+            SetState(GameState.GameOver);
+
+            if (gameTimer != null) gameTimer.StopTimer();
+            if (player != null) player.Freeze(true);
+            if (audioManager != null) audioManager.PlayGameOver();
+            if (characterAnimator != null) characterAnimator.OnExplode();
+
+            int score = scoreManager != null ? scoreManager.Score : 0;
+            SaveManager.SetBestScore(score);
+
+            if (uiManager != null) uiManager.ShowGameOver(score, SaveManager.BestScore);
         }
 
         /// <summary>
@@ -369,7 +595,7 @@ namespace BrainJump
             SetState(GameState.Playing);
 
             if (questionManager != null) questionManager.NewQuestion();
-            if (gameTimer != null) gameTimer.StartTimer(questionTimeLimit);
+            if (gameTimer != null) gameTimer.StartTimer(LevelTimeLimit);
 
             PlayClickSound();
         }
@@ -378,12 +604,15 @@ namespace BrainJump
         public void NextQuestion()
         {
             if (questionManager != null) questionManager.NewQuestion();
-            if (gameTimer != null) gameTimer.StartTimer(questionTimeLimit);
+            if (gameTimer != null) gameTimer.StartTimer(LevelTimeLimit);
 
             if (uiManager != null) uiManager.SetProgress(CorrectCount, QuestionsTotal);
         }
 
-        /// <summary>Level finished: stops the clock, freezes the player and shows the results.</summary>
+        /// <summary>
+        /// Level finished: stops the clock, freezes the player, banks coins, saves stars / best
+        /// score, unlocks the next level and shows the results.
+        /// </summary>
         private void CompleteLevel()
         {
             SetState(GameState.Complete);
@@ -392,10 +621,28 @@ namespace BrainJump
             if (player != null) player.Freeze(true);
             if (audioManager != null) audioManager.PlayWin();
 
-            if (uiManager != null)
-            {
-                uiManager.ShowComplete(CorrectCount, progression != null ? progression.MistakeCount : 0);
-            }
+            int score = scoreManager != null ? scoreManager.Score : 0;
+            int coins = coinManager != null ? coinManager.CoinsThisLevel : 0;
+            if (coinManager != null) coinManager.BankCoins();
+
+            int mistakes = progression != null ? progression.MistakeCount : 0;
+            int stars = mistakes == 0 ? 3 : (mistakes == 1 ? 2 : 1);
+
+            int levelIndex = CurrentWorld * 10 + CurrentLevel;
+            SaveManager.SetStars(levelIndex, stars);
+            SaveManager.SetBestScore(score);
+            SaveManager.UnlockLevel(levelIndex + 1);
+
+            if (uiManager != null) uiManager.ShowComplete(score, coins, stars, mistakes);
+        }
+
+        // ---------------------------------------------------------------------
+        // Power-ups
+        // ---------------------------------------------------------------------
+
+        private void OnPowerUpGranted(PowerUpType type)
+        {
+            if (type == PowerUpType.ExtraTime && gameTimer != null) gameTimer.AddTime(5f);
         }
 
         // ---------------------------------------------------------------------
@@ -424,11 +671,11 @@ namespace BrainJump
             if (uiManager != null) uiManager.ShowHUD();
         }
 
-        /// <summary>Restarts the whole level from scratch (used by the results / fail screen).</summary>
+        /// <summary>Restarts the current level from scratch (used by the results / fail screen).</summary>
         public void RestartLevel()
         {
             Time.timeScale = 1f;
-            StartGame();
+            StartLevel(CurrentWorld, CurrentLevel);
         }
 
         /// <summary>Abandons the current round and returns to the main menu.</summary>

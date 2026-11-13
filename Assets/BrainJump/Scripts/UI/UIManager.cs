@@ -18,6 +18,9 @@ namespace BrainJump
         [SerializeField] private GameObject failPanel;
         [SerializeField] private GameObject completePanel;
         [SerializeField] private GameObject pausePanel;
+        [SerializeField] private GameObject levelSelectPanel;
+        [SerializeField] private GameObject settingsPanel;
+        [SerializeField] private GameObject gameOverPanel;
 
         [Header("HUD Text")]
         [SerializeField] private TextMeshProUGUI questionText;
@@ -25,12 +28,20 @@ namespace BrainJump
         [SerializeField] private TextMeshProUGUI levelText;
         [SerializeField] private TextMeshProUGUI progressText;
         [SerializeField] private TextMeshProUGUI scoreText;
+        [SerializeField] private TextMeshProUGUI coinsText;
+        [SerializeField] private TextMeshProUGUI heartsText;
+        [SerializeField] private TextMeshProUGUI comboText;
 
         [Header("Panel Text")]
         [SerializeField] private TextMeshProUGUI failReasonText;
         [SerializeField] private TextMeshProUGUI completeScoreText;
         [SerializeField] private TextMeshProUGUI completeTitleText;
         [SerializeField] private TextMeshProUGUI menuTitleText;
+        [SerializeField] private TextMeshProUGUI completeStarsText;
+        [SerializeField] private TextMeshProUGUI gameOverScoreText;
+        [SerializeField] private TextMeshProUGUI gameOverTitleText;
+        [SerializeField] private TextMeshProUGUI musicToggleLabel;
+        [SerializeField] private TextMeshProUGUI sfxToggleLabel;
 
         [Header("Timer")]
         [SerializeField] private Image timerFill;
@@ -54,11 +65,31 @@ namespace BrainJump
 
         private const string MenuTitle = "BrainJump";
         private const string CompleteTitle = "Level Complete!";
-        private const string LevelLabel = "Level 1";
+
+        private bool _settingsFromPause;
 
         private void Awake()
         {
             ApplySafeArea();
+        }
+
+        private void Start()
+        {
+            if (ScoreManager.Instance != null)
+            {
+                ScoreManager.Instance.OnScoreChanged += SetScore;
+                ScoreManager.Instance.OnComboChanged += SetCombo;
+            }
+
+            if (CoinManager.Instance != null)
+            {
+                CoinManager.Instance.OnCoinsChanged += SetCoins;
+            }
+
+            if (LivesManager.Instance != null)
+            {
+                LivesManager.Instance.OnHeartsChanged += SetHearts;
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -93,7 +124,15 @@ namespace BrainJump
             }
         }
 
-        public void ShowComplete(int correct, int mistakes)
+        /// <summary>
+        /// Shows the level complete panel with the final score, coins collected,
+        /// stars earned (0-3) and the number of mistakes made.
+        /// </summary>
+        /// <param name="score">Points scored in the level.</param>
+        /// <param name="coins">Coins collected in the level.</param>
+        /// <param name="stars">Stars earned, out of three.</param>
+        /// <param name="mistakes">Number of mistakes made.</param>
+        public void ShowComplete(int score, int coins, int stars, int mistakes)
         {
             HideAllPanels();
             SetPanelActive(completePanel, true);
@@ -105,9 +144,17 @@ namespace BrainJump
 
             if (completeScoreText != null)
             {
-                string mistakeWord = mistakes == 1 ? string.Empty : "s";
-                completeScoreText.text =
-                    $"You solved {correct} questions with {mistakes} mistake{mistakeWord}.";
+                completeScoreText.text = $"Score: {score}  •  Coins: {coins}";
+            }
+
+            if (completeStarsText != null)
+            {
+                completeStarsText.text = $"Stars: {stars}/3"
+                    + (mistakes == 0
+                        ? "  Perfect!"
+                        : mistakes == 1
+                            ? "  1 mistake"
+                            : $"  {mistakes} mistakes");
             }
         }
 
@@ -119,6 +166,9 @@ namespace BrainJump
             SetPanelActive(menuPanel, false);
             SetPanelActive(failPanel, false);
             SetPanelActive(completePanel, false);
+            SetPanelActive(levelSelectPanel, false);
+            SetPanelActive(settingsPanel, false);
+            SetPanelActive(gameOverPanel, false);
             SetPaused(true);
         }
 
@@ -137,6 +187,70 @@ namespace BrainJump
             SetPanelActive(failPanel, false);
             SetPanelActive(completePanel, false);
             SetPanelActive(pausePanel, false);
+            SetPanelActive(levelSelectPanel, false);
+            SetPanelActive(settingsPanel, false);
+            SetPanelActive(gameOverPanel, false);
+        }
+
+        /// <summary>
+        /// Hides every other panel and shows the level select panel.
+        /// </summary>
+        public void ShowLevelSelect()
+        {
+            HideAllPanels();
+            SetPanelActive(levelSelectPanel, true);
+        }
+
+        /// <summary>
+        /// Shows the settings panel, remembering whether it was opened from the
+        /// pause overlay so that <see cref="HideSettings"/> can return there.
+        /// </summary>
+        public void ShowSettings()
+        {
+            _settingsFromPause = pausePanel != null && pausePanel.activeSelf;
+            HideAllPanels();
+            SetPanelActive(settingsPanel, true);
+            UpdateToggleLabels();
+        }
+
+        /// <summary>
+        /// Hides the settings panel and returns to the pause overlay or the
+        /// main menu, depending on where settings were opened from.
+        /// </summary>
+        public void HideSettings()
+        {
+            SetPanelActive(settingsPanel, false);
+
+            if (_settingsFromPause)
+            {
+                ShowPause();
+            }
+            else
+            {
+                ShowMenu();
+            }
+        }
+
+        /// <summary>
+        /// Hides every other panel and shows the game over panel with the final
+        /// score and the best score.
+        /// </summary>
+        /// <param name="score">Score achieved in this run.</param>
+        /// <param name="bestScore">Best score recorded so far.</param>
+        public void ShowGameOver(int score, int bestScore)
+        {
+            HideAllPanels();
+            SetPanelActive(gameOverPanel, true);
+
+            if (gameOverTitleText != null)
+            {
+                gameOverTitleText.text = "Game Over";
+            }
+
+            if (gameOverScoreText != null)
+            {
+                gameOverScoreText.text = $"Score: {score}  •  Best: {bestScore}";
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -176,18 +290,143 @@ namespace BrainJump
                 int shown = Mathf.Clamp(current + 1, 1, total);
                 progressText.text = $"Question {shown} / {total}";
             }
-
-            if (levelText != null)
-            {
-                levelText.text = LevelLabel;
-            }
         }
 
-        public void SetScore(int correct)
+        /// <summary>
+        /// Updates the HUD score label with the current points total.
+        /// </summary>
+        /// <param name="points">Current points total.</param>
+        public void SetScore(int points)
         {
             if (scoreText != null)
             {
-                scoreText.text = $"Score: {correct}";
+                scoreText.text = $"Score: {points}";
+            }
+        }
+
+        /// <summary>
+        /// Updates the HUD coins label.
+        /// </summary>
+        /// <param name="coins">Current coin count.</param>
+        public void SetCoins(int coins)
+        {
+            if (coinsText != null)
+            {
+                coinsText.text = $"Coins: {coins}";
+            }
+        }
+
+        /// <summary>
+        /// Updates the HUD lives label.
+        /// </summary>
+        /// <param name="hearts">Current number of hearts.</param>
+        public void SetHearts(int hearts)
+        {
+            if (heartsText != null)
+            {
+                heartsText.text = $"Lives: {hearts}";
+            }
+        }
+
+        /// <summary>
+        /// Updates the HUD combo label. The label is cleared when the combo is
+        /// below two.
+        /// </summary>
+        /// <param name="combo">Current combo count.</param>
+        public void SetCombo(int combo)
+        {
+            if (comboText != null)
+            {
+                comboText.text = combo >= 2 ? $"COMBO x{combo}" : string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Updates the HUD level label using zero-based world and level indices.
+        /// </summary>
+        /// <param name="world">Zero-based world index.</param>
+        /// <param name="level">Zero-based level index within the world.</param>
+        public void SetLevelLabel(int world, int level)
+        {
+            if (levelText != null)
+            {
+                levelText.text = $"World {world + 1} · Level {level + 1}";
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Settings
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Toggles background music on or off, persists the setting and
+        /// refreshes the settings labels.
+        /// </summary>
+        public void ToggleMusic()
+        {
+            bool enabled = !SaveManager.MusicEnabled;
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.SetMusicEnabled(enabled);
+            }
+            else
+            {
+                SaveManager.MusicEnabled = enabled;
+            }
+
+            UpdateToggleLabels();
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayClick();
+            }
+        }
+
+        /// <summary>
+        /// Toggles sound effects on or off, persists the setting and refreshes
+        /// the settings labels.
+        /// </summary>
+        public void ToggleSfx()
+        {
+            bool enabled = !SaveManager.SfxEnabled;
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.SetSfxEnabled(enabled);
+            }
+            else
+            {
+                SaveManager.SfxEnabled = enabled;
+            }
+
+            UpdateToggleLabels();
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayClick();
+            }
+        }
+
+        /// <summary>
+        /// Clears all saved progress and refreshes the settings labels.
+        /// </summary>
+        public void ResetProgress()
+        {
+            SaveManager.ResetAllProgress();
+            UpdateToggleLabels();
+        }
+
+        private void UpdateToggleLabels()
+        {
+            if (musicToggleLabel != null)
+            {
+                musicToggleLabel.text = "Music: " + (SaveManager.MusicEnabled ? "ON" : "OFF");
+            }
+
+            if (sfxToggleLabel != null)
+            {
+                sfxToggleLabel.text = "SFX: " + (SaveManager.SfxEnabled ? "ON" : "OFF");
             }
         }
 
@@ -234,6 +473,40 @@ namespace BrainJump
             if (menuTitle != null) menuTitleText = menuTitle;
 
             if (fill != null) timerFill = fill;
+        }
+
+        /// <summary>
+        /// Assigns the additional panels and labels created by the SceneBuilder
+        /// (level select, settings, game over, coins, hearts, combo, stars and
+        /// settings toggles). Null arguments leave the existing
+        /// inspector-assigned reference untouched.
+        /// </summary>
+        public void WireExtraPanels(
+            GameObject levelSelect,
+            GameObject settings,
+            GameObject gameOver,
+            TextMeshProUGUI coins,
+            TextMeshProUGUI hearts,
+            TextMeshProUGUI combo,
+            TextMeshProUGUI completeStars,
+            TextMeshProUGUI gameOverScore,
+            TextMeshProUGUI gameOverTitle,
+            TextMeshProUGUI musicLabel,
+            TextMeshProUGUI sfxLabel)
+        {
+            if (levelSelect != null) levelSelectPanel = levelSelect;
+            if (settings != null) settingsPanel = settings;
+            if (gameOver != null) gameOverPanel = gameOver;
+
+            if (coins != null) coinsText = coins;
+            if (hearts != null) heartsText = hearts;
+            if (combo != null) comboText = combo;
+
+            if (completeStars != null) completeStarsText = completeStars;
+            if (gameOverScore != null) gameOverScoreText = gameOverScore;
+            if (gameOverTitle != null) gameOverTitleText = gameOverTitle;
+            if (musicLabel != null) musicToggleLabel = musicLabel;
+            if (sfxLabel != null) sfxToggleLabel = sfxLabel;
         }
 
         // ---------------------------------------------------------------------

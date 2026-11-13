@@ -16,7 +16,17 @@ namespace BrainJump
         [SerializeField] private GameProgression gameProgression;
         [SerializeField] private UIManager uiManager;
 
+        [Header("Power-Ups & Coins")]
+        [SerializeField] private PowerUpManager powerUpManager;
+        [SerializeField] private Coin[] coins;
+        [SerializeField] private PowerUpPickup powerUpPickup;
+
         private string _previousQuestionText = string.Empty;
+
+        private PowerUpPickup _activePowerUp;
+        private int _currentWorld;
+        private int _currentLevel;
+        private bool _levelSet;
 
         public AnswerPlatform[] AnswerPlatforms => answerPlatforms;
 
@@ -29,6 +39,39 @@ namespace BrainJump
             if (platforms != null) answerPlatforms = platforms;
             if (progression != null) gameProgression = progression;
             if (ui != null) uiManager = ui;
+        }
+
+        /// <summary>
+        /// Assigns power-up and coin references (used by the SceneBuilder).
+        /// Only non-null arguments overwrite the current values.
+        /// </summary>
+        /// <param name="pum">Power-up manager used to roll spawns and types.</param>
+        /// <param name="cm">Coin manager reference.</param>
+        /// <param name="coinPool">Coins respawned on every new question.</param>
+        /// <param name="pickup">Pooled power-up pickup placed above a platform.</param>
+        public void WirePowerUps(PowerUpManager pum, CoinManager cm, Coin[] coinPool, PowerUpPickup pickup)
+        {
+            if (pum != null) powerUpManager = pum;
+            if (coinPool != null) coins = coinPool;
+            if (pickup != null) powerUpPickup = pickup;
+        }
+
+        /// <summary>
+        /// Sets the current world (0..2) and level (0..9) used for question
+        /// generation, and forwards it to GameProgression when available.
+        /// </summary>
+        /// <param name="world">0-based world index, clamped to 0..2.</param>
+        /// <param name="level">0-based level index within the world, clamped to 0..9.</param>
+        public void SetLevel(int world, int level)
+        {
+            _currentWorld = Mathf.Clamp(world, 0, 2);
+            _currentLevel = Mathf.Clamp(level, 0, 9);
+            _levelSet = true;
+
+            if (gameProgression != null)
+            {
+                gameProgression?.SetLevel(_currentWorld, _currentLevel);
+            }
         }
 
         public QuestionData CurrentQuestion { get; private set; }
@@ -81,7 +124,9 @@ namespace BrainJump
                 return;
             }
 
-            QuestionData question = QuestionGenerator.Generate(Difficulty, _previousQuestionText);
+            QuestionData question = _levelSet
+                ? QuestionGenerator.GenerateForLevel(_currentWorld, _currentLevel, _previousQuestionText)
+                : QuestionGenerator.Generate(Difficulty, _previousQuestionText);
             if (question == null || question.options == null)
             {
                 return;
@@ -91,6 +136,9 @@ namespace BrainJump
             _previousQuestionText = question.questionText;
 
             ApplyOptionsToPlatforms(question);
+
+            RespawnCoins();
+            MaybeSpawnPowerUp();
 
             if (uiManager != null)
             {
@@ -117,6 +165,11 @@ namespace BrainJump
                     answerPlatforms[i].SetAnswer(0, false);
                 }
             }
+
+            if (_activePowerUp != null)
+            {
+                _activePowerUp.gameObject.SetActive(false);
+            }
         }
 
         private void ApplyOptionsToPlatforms(QuestionData question)
@@ -137,6 +190,59 @@ namespace BrainJump
                 bool isCorrect = i == question.correctIndex;
                 answerPlatforms[i].SetAnswer(optionValue, isCorrect);
             }
+        }
+
+        private void RespawnCoins()
+        {
+            if (coins == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < coins.Length; i++)
+            {
+                Coin coin = coins[i];
+                if (coin != null)
+                {
+                    coin.ResetCoin();
+                }
+            }
+        }
+
+        private void MaybeSpawnPowerUp()
+        {
+            if (_activePowerUp != null && _activePowerUp.gameObject.activeSelf)
+            {
+                return;
+            }
+
+            if (powerUpManager == null || answerPlatforms == null || answerPlatforms.Length == 0)
+            {
+                return;
+            }
+
+            if (!powerUpManager.ShouldSpawnPowerUp())
+            {
+                return;
+            }
+
+            if (powerUpPickup == null)
+            {
+                return;
+            }
+
+            // Fully qualified: both System and UnityEngine define Random.
+            int index = UnityEngine.Random.Range(0, answerPlatforms.Length);
+            if (answerPlatforms[index] == null)
+            {
+                return;
+            }
+
+            _activePowerUp = powerUpPickup;
+            PowerUpType type = powerUpManager.RollPowerUpType();
+            _activePowerUp.Setup(type);
+            _activePowerUp.transform.position = answerPlatforms[index].transform.position + Vector3.up * 1.6f;
+            _activePowerUp.ResetPickup();
         }
     }
 }

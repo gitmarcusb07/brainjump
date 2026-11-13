@@ -42,6 +42,9 @@ namespace BrainJump
         /// <summary>True while a one-shot animation owns the visual transform.</summary>
         private bool _animating;
 
+        /// <summary>True while the falling pose (arms up, no leg swing) is active.</summary>
+        private bool _falling;
+
         // Body parts created by the SceneBuilder. Any of them may be missing.
         private Transform _visual;        // "Visual" container -> "Body" -> root fallback
         private bool _canAnimateVisual;   // false when we fell back to the root transform
@@ -53,6 +56,9 @@ namespace BrainJump
         private Transform _armR;
         private Transform _legL;
         private Transform _legR;
+        private Transform _cheekL;
+        private Transform _cheekR;
+        private Transform _tuft;
 
         // Stored rest poses.
         private Vector3 _visualBaseLocalPosition;
@@ -69,6 +75,10 @@ namespace BrainJump
         private Quaternion _armRBaseRotation;
         private Quaternion _legLBaseRotation;
         private Quaternion _legRBaseRotation;
+
+        private Vector3 _cheekLBaseScale;
+        private Vector3 _cheekRBaseScale;
+        private Quaternion _tuftBaseRotation;
 
         // Blink timing (done inline in Update — cheaper than a coroutine on mobile).
         private float _blinkTimer;
@@ -106,6 +116,9 @@ namespace BrainJump
             _armR = FindPart("ArmR");
             _legL = FindPart("LegL");
             _legR = FindPart("LegR");
+            _cheekL = FindPart("CheekL");
+            _cheekR = FindPart("CheekR");
+            _tuft = FindPart("Tuft");
 
             _visualBaseLocalPosition = _visual.localPosition;
             _visualBaseLocalScale = _visual.localScale;
@@ -119,6 +132,9 @@ namespace BrainJump
             if (_armR != null) _armRBaseRotation = _armR.localRotation;
             if (_legL != null) _legLBaseRotation = _legL.localRotation;
             if (_legR != null) _legRBaseRotation = _legR.localRotation;
+            if (_cheekL != null) _cheekLBaseScale = _cheekL.localScale;
+            if (_cheekR != null) _cheekRBaseScale = _cheekR.localScale;
+            if (_tuft != null) _tuftBaseRotation = _tuft.localRotation;
 
             _particles = GetComponentInChildren<ParticleSystem>();
 
@@ -196,10 +212,18 @@ namespace BrainJump
         {
             float swing = _running ? Mathf.Sin(Time.time * runBobSpeed) * 35f : 0f;
 
-            if (_armL != null) _armL.localRotation = _armLBaseRotation * Quaternion.Euler(swing, 0f, 0f);
-            if (_armR != null) _armR.localRotation = _armRBaseRotation * Quaternion.Euler(-swing, 0f, 0f);
-            if (_legL != null) _legL.localRotation = _legLBaseRotation * Quaternion.Euler(-swing, 0f, 0f);
-            if (_legR != null) _legR.localRotation = _legRBaseRotation * Quaternion.Euler(swing, 0f, 0f);
+            if (_falling)
+            {
+                if (_armL != null) _armL.localRotation = _armLBaseRotation * Quaternion.Euler(-150f, 0f, 0f);
+                if (_armR != null) _armR.localRotation = _armRBaseRotation * Quaternion.Euler(-150f, 0f, 0f);
+            }
+            else
+            {
+                if (_armL != null) _armL.localRotation = _armLBaseRotation * Quaternion.Euler(swing, 0f, 0f);
+                if (_armR != null) _armR.localRotation = _armRBaseRotation * Quaternion.Euler(-swing, 0f, 0f);
+                if (_legL != null) _legL.localRotation = _legLBaseRotation * Quaternion.Euler(-swing, 0f, 0f);
+                if (_legR != null) _legR.localRotation = _legRBaseRotation * Quaternion.Euler(swing, 0f, 0f);
+            }
 
             if (_head != null)
             {
@@ -267,6 +291,16 @@ namespace BrainJump
             _running = running;
         }
 
+        /// <summary>
+        /// Enables / disables the falling pose: both arms raised overhead and the leg swing
+        /// suspended while active.
+        /// </summary>
+        /// <param name="falling">True to show the falling pose, false to return to normal limb animation.</param>
+        public void SetFalling(bool falling)
+        {
+            _falling = falling;
+        }
+
         /// <summary>Quick vertical stretch that eases back to rest.</summary>
         public void OnJump()
         {
@@ -301,6 +335,21 @@ namespace BrainJump
 
             PrepareForOneShot();
             _currentAnim = StartCoroutine(CelebrateRoutine());
+        }
+
+        /// <summary>
+        /// Short "dizzy" reaction (e.g. after a wrong answer): eyes close and the visual wobbles
+        /// side to side with decaying amplitude, then returns exactly to the rest pose.
+        /// </summary>
+        public void OnDizzy()
+        {
+            if (_exploded)
+            {
+                return;
+            }
+
+            PrepareForOneShot();
+            _currentAnim = StartCoroutine(DizzyRoutine());
         }
 
         /// <summary>Hides the character and bursts it into primitive debris. Stays hidden until reset.</summary>
@@ -368,6 +417,11 @@ namespace BrainJump
             if (_armR != null) _armR.localRotation = _armRBaseRotation;
             if (_legL != null) _legL.localRotation = _legLBaseRotation;
             if (_legR != null) _legR.localRotation = _legRBaseRotation;
+            if (_cheekL != null) _cheekL.localScale = _cheekLBaseScale;
+            if (_cheekR != null) _cheekR.localScale = _cheekRBaseScale;
+            if (_tuft != null) _tuft.localRotation = _tuftBaseRotation;
+
+            _falling = false;
 
             SetEyesOpen(true);
 
@@ -490,6 +544,39 @@ namespace BrainJump
             {
                 _visual.localRotation = _visualBaseLocalRotation;
                 _visual.localScale = _visualBaseLocalScale;
+            }
+
+            _animating = false;
+            _currentAnim = null;
+        }
+
+        private IEnumerator DizzyRoutine()
+        {
+            _animating = true;
+
+            SetEyesOpen(false);
+
+            const float duration = 0.7f;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / duration);
+                float wobble = Mathf.Sin(elapsed * 20f) * 12f * (1f - k);
+
+                if (_canAnimateVisual)
+                {
+                    _visual.localRotation = _visualBaseLocalRotation * Quaternion.Euler(0f, 0f, wobble);
+                }
+
+                yield return null;
+            }
+
+            SetEyesOpen(true);
+
+            if (_canAnimateVisual)
+            {
+                _visual.localRotation = _visualBaseLocalRotation;
             }
 
             _animating = false;

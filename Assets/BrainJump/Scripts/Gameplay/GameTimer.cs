@@ -60,6 +60,19 @@ namespace BrainJump
             Running = false;
         }
 
+        /// <summary>
+        /// Adds bonus seconds to the current countdown (e.g. the ExtraTime power-up).
+        /// The remaining time is capped at <see cref="Duration"/>; non-positive values are ignored.
+        /// </summary>
+        /// <param name="seconds">Seconds to add.</param>
+        public void AddTime(float seconds)
+        {
+            if (seconds <= 0f) return;
+
+            Remaining = Mathf.Min(Duration, Remaining + seconds);
+            UpdateUI();
+        }
+
         private void Update()
         {
             if (!Running)

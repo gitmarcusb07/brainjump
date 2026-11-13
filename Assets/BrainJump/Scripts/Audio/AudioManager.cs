@@ -29,6 +29,12 @@ namespace BrainJump
             set => masterVolume = Mathf.Clamp01(value);
         }
 
+        /// <summary>True while background music is allowed to play. Loaded from SaveManager in Start().</summary>
+        public bool MusicEnabled { get; private set; } = true;
+
+        /// <summary>True while sound effects are allowed to play. Loaded from SaveManager in Start().</summary>
+        public bool SfxEnabled { get; private set; } = true;
+
         // ------------------------------------------------------------------ constants
 
         private const int SampleRate = 44100;          // Hz, mono
@@ -47,6 +53,13 @@ namespace BrainJump
         private AudioClip _wrongClip;
         private AudioClip _explosionClip;
         private AudioClip _winClip;
+        private AudioClip _coinClip;
+        private AudioClip _powerUpClip;
+        private AudioClip _gameOverClip;
+
+        // Dedicated looping background-music source (never part of the SFX pool).
+        private AudioSource _musicSource;
+        private AudioClip _musicClip;
 
         /// <summary>True while this component is still usable (not destroyed and initialised).</summary>
         private bool IsAlive => this != null && _sources != null;
@@ -64,6 +77,13 @@ namespace BrainJump
 
             BuildSourcePool();
             Instance = this;
+        }
+
+        private void Start()
+        {
+            MusicEnabled = SaveManager.MusicEnabled;
+            SfxEnabled = SaveManager.SfxEnabled;
+            StartMusic();
         }
 
         private void OnDestroy()
@@ -92,6 +112,19 @@ namespace BrainJump
 
                 _sources[i] = source;
             }
+
+            GameObject musicObject = new GameObject("MusicSource");
+            musicObject.transform.SetParent(transform, false);
+
+            AudioSource musicSource = musicObject.AddComponent<AudioSource>();
+            if (musicSource != null)
+            {
+                musicSource.playOnAwake = false;
+                musicSource.loop = true;
+                musicSource.spatialBlend = 0f; // pure 2D audio
+            }
+
+            _musicSource = musicSource;
         }
 
         // ------------------------------------------------------------------ mix control
@@ -100,6 +133,11 @@ namespace BrainJump
         public void SetMuted(bool value)
         {
             muted = value;
+
+            if (_musicSource != null)
+            {
+                _musicSource.volume = muted ? 0f : masterVolume * 0.35f;
+            }
 
             if (_sources == null)
             {
@@ -119,6 +157,68 @@ namespace BrainJump
         public void ToggleMute()
         {
             SetMuted(!muted);
+        }
+
+        /// <summary>
+        /// Enables or disables background music, persists the choice via SaveManager and
+        /// starts or stops the music loop accordingly.
+        /// </summary>
+        /// <param name="enabled">True to allow music, false to silence it.</param>
+        public void SetMusicEnabled(bool enabled)
+        {
+            MusicEnabled = enabled;
+            SaveManager.MusicEnabled = enabled;
+
+            if (enabled)
+            {
+                StartMusic();
+            }
+            else
+            {
+                StopMusic();
+            }
+        }
+
+        /// <summary>Enables or disables sound effects and persists the choice via SaveManager.</summary>
+        /// <param name="enabled">True to allow sound effects, false to silence them.</param>
+        public void SetSfxEnabled(bool enabled)
+        {
+            SfxEnabled = enabled;
+            SaveManager.SfxEnabled = enabled;
+        }
+
+        /// <summary>
+        /// Starts the looping background music (building the clip lazily on first use).
+        /// Does nothing when music is disabled or the music source is missing.
+        /// </summary>
+        public void StartMusic()
+        {
+            if (!MusicEnabled || _musicSource == null) return;
+
+            if (_musicClip == null)
+            {
+                _musicClip = BuildMusicLoop();
+            }
+
+            if (_musicClip == null) return;
+
+            _musicSource.clip = _musicClip;
+            _musicSource.loop = true;
+            _musicSource.volume = muted ? 0f : masterVolume * 0.35f;
+
+            if (!_musicSource.isPlaying)
+            {
+                _musicSource.Play();
+            }
+        }
+
+        /// <summary>Stops the background music if it is playing.</summary>
+        public void StopMusic()
+        {
+            if (_musicSource != null)
+            {
+                _musicSource.Stop();
+            }
         }
 
         // ------------------------------------------------------------------ public playback API
@@ -223,6 +323,54 @@ namespace BrainJump
             PlayClip(_winClip);
         }
 
+        /// <summary>Bright two-note chime played when a coin is collected.</summary>
+        public void PlayCoin()
+        {
+            if (!IsAlive) return;
+
+            if (_coinClip == null)
+            {
+                _coinClip = MakeTone(
+                    new[] { 988f, 1319f },
+                    new[] { 0.07f, 0.12f },
+                    0.65f);
+            }
+
+            PlayClip(_coinClip);
+        }
+
+        /// <summary>Quick rising four-note arpeggio played when a power-up is picked up.</summary>
+        public void PlayPowerUp()
+        {
+            if (!IsAlive) return;
+
+            if (_powerUpClip == null)
+            {
+                _powerUpClip = MakeTone(
+                    new[] { 392f, 523f, 659f, 784f },
+                    new[] { 0.07f, 0.07f, 0.07f, 0.07f },
+                    0.65f);
+            }
+
+            PlayClip(_powerUpClip);
+        }
+
+        /// <summary>Slow descending four-note phrase played on game over.</summary>
+        public void PlayGameOver()
+        {
+            if (!IsAlive) return;
+
+            if (_gameOverClip == null)
+            {
+                _gameOverClip = MakeTone(
+                    new[] { 392f, 330f, 262f, 196f },
+                    new[] { 0.15f, 0.15f, 0.15f, 0.15f },
+                    0.65f);
+            }
+
+            PlayClip(_gameOverClip);
+        }
+
         // ------------------------------------------------------------------ playback core
 
         /// <summary>
@@ -231,6 +379,11 @@ namespace BrainJump
         /// </summary>
         private void PlayClip(AudioClip clip, float volumeScale = 1f)
         {
+            if (!SfxEnabled)
+            {
+                return;
+            }
+
             if (clip == null || _sources == null || _sources.Length == 0)
             {
                 return;
@@ -436,6 +589,72 @@ namespace BrainJump
             }
 
             return CreateClip("BJ_Explosion", data);
+        }
+
+        /// <summary>
+        /// Cheerful 4-second background loop: 16 melody notes (0.25 s each) with a soft sine
+        /// bass underneath (131 Hz for the first half, 196 Hz for the second half). The whole
+        /// buffer gets a 5 ms fade in/out so the loop point never clicks.
+        /// </summary>
+        private AudioClip BuildMusicLoop()
+        {
+            AudioClip melody = MakeTone(
+                new[] { 523f, 659f, 784f, 880f, 784f, 659f, 587f, 523f,
+                        523f, 659f, 784f, 1047f, 880f, 784f, 659f, 587f },
+                new[] { 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f,
+                        0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f },
+                0.5f);
+            if (melody == null)
+            {
+                return null;
+            }
+
+            float[] data = new float[melody.samples];
+            melody.GetData(data, 0);
+            Destroy(melody); // temporary clip, keep memory flat on mobile
+
+            int sampleCount = data.Length;
+            if (sampleCount == 0)
+            {
+                return null;
+            }
+
+            // Bass switches note after the first 8 melody notes (8 x 0.25 s).
+            int noteSamples = Mathf.Max(1, Mathf.RoundToInt(0.25f * SampleRate));
+            int halfSamples = Mathf.Min(sampleCount, noteSamples * 8);
+            int fadeSamples = Mathf.Clamp(
+                Mathf.RoundToInt(FadeSeconds * SampleRate),
+                1,
+                Mathf.Max(1, sampleCount / 2));
+
+            double bassPhase = 0.0; // continuous phase so the bass note change never clicks
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                double bassFrequency = i < halfSamples ? 131.0 : 196.0;
+                float bass = Mathf.Sin((float)bassPhase) * 0.25f;
+                bassPhase += 2.0 * Mathf.PI * bassFrequency / SampleRate;
+                if (bassPhase > 2.0 * Mathf.PI)
+                {
+                    bassPhase -= 2.0 * Mathf.PI;
+                }
+
+                float envelope = 1f;
+                if (i < fadeSamples)
+                {
+                    envelope = (float)i / fadeSamples;
+                }
+                else if (i > sampleCount - fadeSamples)
+                {
+                    envelope = (float)(sampleCount - i) / fadeSamples;
+                }
+
+                envelope = Mathf.Clamp01(envelope);
+
+                data[i] = Mathf.Clamp((data[i] + bass) * envelope, -1f, 1f);
+            }
+
+            return CreateClip("BJ_MusicLoop", data);
         }
 
         /// <summary>Wraps a sample buffer into a 44.1 kHz mono (non-streaming) AudioClip.</summary>

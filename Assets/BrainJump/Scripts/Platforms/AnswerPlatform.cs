@@ -23,6 +23,13 @@ namespace BrainJump
         [Header("Bounce")]
         [SerializeField] private float bounceDuration = 0.25f;
 
+        [Header("Movement")]
+        [SerializeField] private bool moving;
+        [SerializeField] private float driftAmplitude = 0.6f;
+        [SerializeField] private float driftSpeed = 0.8f;
+
+        [SerializeField] private Transform pulseRing;
+
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorId = Shader.PropertyToID("_Color");
 
@@ -30,8 +37,18 @@ namespace BrainJump
         private Coroutine _bounceCoroutine;
         private bool _answeredThisRound;
 
+        private Vector3 _basePosition;
+        private Coroutine _pulseCoroutine;
+
         public int AnswerValue { get; private set; }
         public bool IsCorrect { get; private set; }
+
+        /// <summary>
+        /// World-space displacement applied to this platform during the current frame
+        /// by its sideways drift. Zero when the platform is not moving. Used by the
+        /// PlayerController to carry a standing player along with the platform.
+        /// </summary>
+        public Vector3 FrameDelta { get; private set; }
 
         private void Awake()
         {
@@ -42,6 +59,9 @@ namespace BrainJump
                 answerLabel = GetComponentInChildren<TextMeshPro>(true);
 
             CacheMaterial();
+
+            _basePosition = transform.position;
+            FrameDelta = Vector3.zero;
         }
 
         private void OnDestroy()
@@ -49,6 +69,8 @@ namespace BrainJump
             // The material was created via Renderer.material, so release the instance.
             if (_platformMaterial != null)
                 Destroy(_platformMaterial);
+
+            StopPulse();
         }
 
         /// <summary>
@@ -79,7 +101,13 @@ namespace BrainJump
         public void ResetVisual()
         {
             StopBounce();
+            StopPulse();
             transform.localScale = Vector3.one;
+            if (moving)
+            {
+                transform.position = _basePosition;
+                FrameDelta = Vector3.zero;
+            }
             ApplyColor(idleColor);
         }
 
@@ -107,6 +135,7 @@ namespace BrainJump
 
             StopBounce();
             _bounceCoroutine = StartCoroutine(BounceRoutine());
+            PlayLandingPulse();
 
             manager.ValidateAnswer(this);
         }
@@ -170,6 +199,105 @@ namespace BrainJump
 
             if (_platformMaterial.HasProperty(ColorId))
                 _platformMaterial.SetColor(ColorId, color);
+        }
+
+        /// <summary>
+        /// Enables or disables the slow sideways drift of this platform.
+        /// The current world position becomes the new drift centre.
+        /// </summary>
+        /// <param name="value">True to make the platform drift, false to keep it static.</param>
+        /// <param name="amplitude">Maximum sideways offset in world units (clamped to be non-negative).</param>
+        /// <param name="speed">Angular speed of the drift oscillation (clamped to be non-negative).</param>
+        public void SetMoving(bool value, float amplitude, float speed)
+        {
+            moving = value;
+            driftAmplitude = Mathf.Max(0f, amplitude);
+            driftSpeed = Mathf.Max(0f, speed);
+            _basePosition = transform.position;
+            FrameDelta = Vector3.zero;
+        }
+
+        private void Update()
+        {
+            if (!moving)
+            {
+                FrameDelta = Vector3.zero;
+                return;
+            }
+
+            Vector3 newPosition = _basePosition + Vector3.right * (Mathf.Sin(Time.time * driftSpeed) * driftAmplitude);
+            FrameDelta = newPosition - transform.position;
+            transform.position = newPosition;
+        }
+
+        /// <summary>
+        /// Assigns the pulse ring transform (created by the SceneBuilder as a child
+        /// named "PulseRing"). Null values are ignored.
+        /// </summary>
+        /// <param name="ring">The ring transform to animate on landing.</param>
+        public void WirePulseRing(Transform ring)
+        {
+            if (ring != null)
+                pulseRing = ring;
+        }
+
+        /// <summary>
+        /// Plays a short expanding pulse on the pulse ring, if one is wired.
+        /// Restarts the pulse if it is already playing.
+        /// </summary>
+        public void PlayLandingPulse()
+        {
+            if (pulseRing == null)
+                return;
+
+            StopPulse();
+            _pulseCoroutine = StartCoroutine(PulseRoutine());
+        }
+
+        private IEnumerator PulseRoutine()
+        {
+            const float duration = 0.4f;
+
+            if (pulseRing == null)
+            {
+                _pulseCoroutine = null;
+                yield break;
+            }
+
+            Vector3 baseScale = pulseRing.localScale;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                if (pulseRing == null)
+                {
+                    _pulseCoroutine = null;
+                    yield break;
+                }
+
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / duration);
+                float s = 1f + 0.6f * Mathf.Sin(k * Mathf.PI);
+                pulseRing.localScale = new Vector3(baseScale.x * s, baseScale.y, baseScale.z * s);
+                yield return null;
+            }
+
+            if (pulseRing != null)
+                pulseRing.localScale = baseScale;
+
+            _pulseCoroutine = null;
+        }
+
+        private void StopPulse()
+        {
+            if (_pulseCoroutine == null)
+                return;
+
+            StopCoroutine(_pulseCoroutine);
+            _pulseCoroutine = null;
+
+            // Assumes the ring's rest local scale is Vector3.one (as specified).
+            if (pulseRing != null)
+                pulseRing.localScale = Vector3.one;
         }
     }
 }

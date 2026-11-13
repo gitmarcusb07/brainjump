@@ -1,0 +1,19 @@
+# Unity generated files — never commit these
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Asset meta files are REQUIRED (Unity uses them for GUIDs) — do not ignore *.meta
+# MemoryCaptures
+[Mm]emoryCaptures/
+
+# Crash reports
+sysinfo.txt
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 23
+  productGUID: a1b2c3d4e5f64748a1b2c3d4e5f64748
+  AndroidBundleVersionCode: 1
+  AndroidMinSdkVersion: 24
+  AndroidTargetSdkVersion: 35
+  applicationIdentifier:
+    Android: com.marcus.brainjump
+    Standalone: com.marcus.brainjump
+  companyName: Marcus
+  productName: BrainJump
+  defaultScreenWidth: 1080
+  defaultScreenHeight: 1920
+  defaultScreenOrientation: 0
+  runInBackground: 1
+  displayResolutionDialog: 0
+  defaultIsFullScreen: 1
+  defaultIsNativeResolution: 1
+  usePlayerLog: 1
+  bakeCollisionMeshes: 0
+  forceSingleInstance: 0
+  gpuSkinning: 0
+  graphicsJobs: 0
+  scriptingBackend:
+    Android: 1
+  apiCompatibilityLevelPerPlatform:
+    Android: 2

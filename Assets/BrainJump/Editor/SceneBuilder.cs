@@ -6,6 +6,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace BrainJump.Editor
 {
@@ -160,13 +161,14 @@ namespace BrainJump.Editor
                 GameObject labelGO = new GameObject("AnswerLabel");
                 labelGO.transform.SetParent(platformGO.transform, false);
                 labelGO.transform.localPosition = new Vector3(0f, 0.45f, 0f);
-                labelGO.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                labelGO.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
 
                 TextMeshPro label = labelGO.AddComponent<TextMeshPro>();
                 label.text = "?";
-                label.fontSize = 8f;
+                label.fontSize = 96f;
                 label.alignment = TextAlignmentOptions.Center;
                 label.color = ColorFromHex("#172B42");
+                ((RectTransform)labelGO.transform).sizeDelta = new Vector2(4f, 2f);
 
                 MakePrimitive(
                     PrimitiveType.Cylinder,

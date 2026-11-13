@@ -68,7 +68,7 @@ namespace BrainJump.Editor
             MakeText("Subtitle", menuPanel, "Jump to the right answer!", 40, offWhite,
                 TextAlignmentOptions.Center, false, new Vector2(0f, 300f), new Vector2(900f, 80f));
 
-            Button playButton = MakeButton("PlayButton", menuPanel, "▶ PLAY", warmGold, midnightBlue,
+            Button playButton = MakeButton("PlayButton", menuPanel, "PLAY", warmGold, midnightBlue,
                 new Vector2(0f, 0f), new Vector2(520f, 130f), 48);
 
             Button settingsButton = MakeButton("SettingsButton", menuPanel, "Settings", skyBlue, midnightBlue,

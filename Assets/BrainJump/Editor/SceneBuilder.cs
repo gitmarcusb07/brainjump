@@ -27,6 +27,10 @@ namespace BrainJump.Editor
             Debug.Log("BrainJump: prototype scene built. Open MainScene and press Play.");
         }
 
+        /// <summary>
+        /// Builds the floating island environment: materials, lighting, fog, island body,
+        /// vines, waterfalls, sun, answer platforms, clouds and distant islands.
+        /// </summary>
         public static void BuildEnvironment()
         {
             if (GraphicsSettings.currentRenderPipeline == null || Shader.Find("Universal Render Pipeline/Lit") == null)
@@ -45,8 +49,8 @@ namespace BrainJump.Editor
             Material matSky = CreateMaterial("Mat_Sky", ColorFromHex("#75B9D4"));
             Material matOffWhite = CreateMaterial("Mat_OffWhite", ColorFromHex("#F7F4EC"));
             CreateMaterial("Mat_Dark", ColorFromHex("#172B42"));
-            CreateMaterial("Mat_Cloud", Color.white);
-            CreateMaterial("Mat_Trunk", ColorFromHex("#7A5230"));
+            Material matCloud = CreateMaterial("Mat_Cloud", Color.white);
+            Material matTrunk = CreateMaterial("Mat_Trunk", ColorFromHex("#7A5230"));
 
             Material matCrystal = CreateMaterial("Mat_Crystal", ColorFromHex("#75B9D4"));
             if (matCrystal != null)
@@ -54,6 +58,44 @@ namespace BrainJump.Editor
                 matCrystal.EnableKeyword("_EMISSION");
                 matCrystal.SetColor("_EmissionColor", ColorFromHex("#75B9D4") * 0.6f);
             }
+
+            Material matWater = CreateMaterial("Mat_Water", ColorFromHex("#5FB8D9"));
+            if (matWater != null)
+            {
+                matWater.SetFloat("_Surface", 1f);
+            }
+
+            Material matSun = CreateMaterial("Mat_Sun", ColorFromHex("#FFF3B0"));
+            if (matSun != null)
+            {
+                matSun.EnableKeyword("_EMISSION");
+                matSun.SetColor("_EmissionColor", ColorFromHex("#FFF3B0") * 0.9f);
+            }
+
+            CreateMaterial("Mat_Particle", Color.white);
+
+            Material matGlowGold = CreateMaterial("Mat_GlowGold", ColorFromHex("#F2B85B"));
+            if (matGlowGold != null)
+            {
+                matGlowGold.EnableKeyword("_EMISSION");
+                matGlowGold.SetColor("_EmissionColor", ColorFromHex("#F2B85B") * 0.5f);
+            }
+
+            Material matGlowCoral = CreateMaterial("Mat_GlowCoral", ColorFromHex("#E98270"));
+            if (matGlowCoral != null)
+            {
+                matGlowCoral.EnableKeyword("_EMISSION");
+                matGlowCoral.SetColor("_EmissionColor", ColorFromHex("#E98270") * 0.5f);
+            }
+
+            Material matGlowSky = CreateMaterial("Mat_GlowSky", ColorFromHex("#75B9D4"));
+            if (matGlowSky != null)
+            {
+                matGlowSky.EnableKeyword("_EMISSION");
+                matGlowSky.SetColor("_EmissionColor", ColorFromHex("#75B9D4") * 0.5f);
+            }
+
+            Material matVine = CreateMaterial("Mat_Vine", ColorFromHex("#2E6B4A"));
 
             Light directionalLight = null;
             Light[] lights = Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
@@ -102,6 +144,7 @@ namespace BrainJump.Editor
             BoxCollider grassCollider = grassTop.AddComponent<BoxCollider>();
             grassCollider.size = new Vector3(10f, 0.15f, 10f);
 
+            // Layered rock underside.
             MakePrimitive(
                 PrimitiveType.Sphere,
                 "RockBody",
@@ -112,13 +155,104 @@ namespace BrainJump.Editor
                 false);
 
             MakePrimitive(
+                PrimitiveType.Cylinder,
+                "RockMid",
+                island.transform,
+                new Vector3(0f, -3.1f, 0f),
+                new Vector3(3.4f, 1.0f, 3.4f),
+                matRock,
+                false);
+
+            MakePrimitive(
+                PrimitiveType.Cylinder,
+                "RockLow",
+                island.transform,
+                new Vector3(0f, -4.0f, 0f),
+                new Vector3(2.0f, 0.9f, 2.0f),
+                matRock,
+                false);
+
+            MakePrimitive(
                 PrimitiveType.Sphere,
                 "RockTip",
                 island.transform,
-                new Vector3(0f, -3.8f, 0f),
-                new Vector3(2.0f, 1.8f, 2.0f),
+                new Vector3(0f, -4.6f, 0f),
+                new Vector3(1.4f, 1.4f, 1.4f),
                 matRock,
                 false);
+
+            // Hanging vines around the island rim.
+            float[] vineAngles = { 30f, 90f, 150f, 220f, 300f };
+            const float vineRadius = 4.4f;
+            for (int v = 0; v < vineAngles.Length; v++)
+            {
+                float rad = vineAngles[v] * Mathf.Deg2Rad;
+                float vx = Mathf.Cos(rad) * vineRadius;
+                float vz = Mathf.Sin(rad) * vineRadius;
+
+                MakePrimitive(
+                    PrimitiveType.Cylinder,
+                    "Vine_" + v,
+                    island.transform,
+                    new Vector3(vx, -0.75f, vz),
+                    new Vector3(0.08f, 1.1f, 0.08f),
+                    matVine,
+                    true);
+
+                MakePrimitive(
+                    PrimitiveType.Sphere,
+                    "VineLeaf_" + v,
+                    island.transform,
+                    new Vector3(vx, -1.35f, vz),
+                    new Vector3(0.3f, 0.3f, 0.3f),
+                    matGrass,
+                    true);
+            }
+
+            // Waterfalls with splash puffs.
+            Vector3[] waterfallPositions =
+            {
+                new Vector3(3.6f, -1.4f, 2.6f),
+                new Vector3(-3.2f, -1.4f, -3.0f)
+            };
+            Vector3[] splashPositions =
+            {
+                new Vector3(3.6f, -2.7f, 2.6f),
+                new Vector3(-3.2f, -2.7f, -3.0f)
+            };
+            for (int w = 0; w < waterfallPositions.Length; w++)
+            {
+                MakePrimitive(
+                    PrimitiveType.Cube,
+                    "Waterfall_" + w,
+                    island.transform,
+                    waterfallPositions[w],
+                    new Vector3(0.5f, 2.6f, 0.12f),
+                    matWater,
+                    true);
+
+                if (w < splashPositions.Length)
+                {
+                    MakePrimitive(
+                        PrimitiveType.Sphere,
+                        "WaterfallSplash_" + w,
+                        island.transform,
+                        splashPositions[w],
+                        new Vector3(0.7f, 0.25f, 0.7f),
+                        matCloud,
+                        true);
+                }
+            }
+
+            // Sun at scene root.
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "Sun",
+                null,
+                new Vector3(-18f, 14f, 25f),
+                new Vector3(3f, 3f, 3f),
+                matSun,
+                true);
 
             GameObject platformsRoot = new GameObject("Platforms");
             BuiltPlatforms = new List<AnswerPlatform>();
@@ -137,6 +271,7 @@ namespace BrainJump.Editor
                 ColorFromHex("#75B9D4")
             };
             Material[] platformBaseMaterials = { matGold, matCoral, matSky };
+            Material[] glowMaterials = { matGlowGold, matGlowCoral, matGlowSky };
 
             for (int i = 0; i < platformNames.Length; i++)
             {
@@ -179,9 +314,144 @@ namespace BrainJump.Editor
                     matOffWhite,
                     true);
 
+                MakePrimitive(
+                    PrimitiveType.Cylinder,
+                    "Rim",
+                    platformGO.transform,
+                    new Vector3(0f, 0.28f, 0f),
+                    new Vector3(1.7f, 0.12f, 1.7f),
+                    matRock,
+                    true);
+
+                Material glowMaterial = (i >= 0 && i < glowMaterials.Length) ? glowMaterials[i] : null;
+                MakePrimitive(
+                    PrimitiveType.Cylinder,
+                    "GlowRing",
+                    platformGO.transform,
+                    new Vector3(0f, 0.42f, 0f),
+                    new Vector3(1.55f, 0.04f, 1.55f),
+                    glowMaterial,
+                    true);
+
+                GameObject pulseRingGO = MakePrimitive(
+                    PrimitiveType.Cylinder,
+                    "PulseRing",
+                    platformGO.transform,
+                    new Vector3(0f, 0.44f, 0f),
+                    new Vector3(2.0f, 0.05f, 2.0f),
+                    matGold,
+                    true);
+                Transform pulseRingTransform = pulseRingGO != null ? pulseRingGO.transform : null;
+
                 AnswerPlatform platform = platformGO.AddComponent<AnswerPlatform>();
                 SetIdleColor(platform, platformColors[i]);
+                if (platform != null && pulseRingTransform != null)
+                {
+                    platform.WirePulseRing(pulseRingTransform);
+                }
                 BuiltPlatforms.Add(platform);
+            }
+
+            // Puffy clouds (main body + two side puffs each).
+            GameObject cloudsRoot = new GameObject("Clouds");
+            float[] cloudAngles = { 20f, 110f, 200f, 290f };
+            float[] cloudRadii = { 14f, 16f, 13f, 18f };
+            float[] cloudHeights = { 6f, 8f, 5f, 9f };
+            int cloudCount = Mathf.Min(cloudAngles.Length, Mathf.Min(cloudRadii.Length, cloudHeights.Length));
+            for (int i = 0; i < cloudCount; i++)
+            {
+                float rad = cloudAngles[i] * Mathf.Deg2Rad;
+                Vector3 cloudPosition = new Vector3(
+                    Mathf.Cos(rad) * cloudRadii[i],
+                    cloudHeights[i],
+                    Mathf.Sin(rad) * cloudRadii[i]);
+
+                GameObject cloud = new GameObject("Cloud_" + i);
+                cloud.transform.SetParent(cloudsRoot.transform, false);
+                cloud.transform.localPosition = cloudPosition;
+                cloud.transform.localRotation = Quaternion.Euler(0f, cloudAngles[i], 0f);
+
+                MakePrimitive(
+                    PrimitiveType.Sphere,
+                    "CloudMain",
+                    cloud.transform,
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(2.5f, 0.8f, 1.5f),
+                    matCloud,
+                    true);
+
+                MakePrimitive(
+                    PrimitiveType.Sphere,
+                    "CloudPuffLeft",
+                    cloud.transform,
+                    new Vector3(-1.1f, 0.15f, 0.2f),
+                    new Vector3(1.4f, 0.6f, 1.0f),
+                    matCloud,
+                    true);
+
+                MakePrimitive(
+                    PrimitiveType.Sphere,
+                    "CloudPuffRight",
+                    cloud.transform,
+                    new Vector3(1.1f, 0.1f, -0.1f),
+                    new Vector3(1.5f, 0.65f, 1.1f),
+                    matCloud,
+                    true);
+            }
+
+            // Distant islands.
+            GameObject distantRoot = new GameObject("DistantIslands");
+            Vector3[] distantIslandPositions =
+            {
+                new Vector3(-14f, -3f, 18f),
+                new Vector3(15f, -5f, 16f),
+                new Vector3(-20f, -6f, 22f),
+                new Vector3(18f, -4f, 26f)
+            };
+            for (int i = 0; i < distantIslandPositions.Length; i++)
+            {
+                GameObject distant = new GameObject("DistantIsland_" + i);
+                distant.transform.SetParent(distantRoot.transform, false);
+                distant.transform.localPosition = distantIslandPositions[i];
+
+                MakePrimitive(
+                    PrimitiveType.Cylinder,
+                    "DistantGrass",
+                    distant.transform,
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(2f, 0.08f, 2f),
+                    matGrass,
+                    true);
+
+                MakePrimitive(
+                    PrimitiveType.Sphere,
+                    "DistantRock",
+                    distant.transform,
+                    new Vector3(0f, -0.9f, 0f),
+                    new Vector3(1.9f, 1.6f, 1.9f),
+                    matRock,
+                    true);
+
+                if (i == 0)
+                {
+                    MakePrimitive(
+                        PrimitiveType.Cylinder,
+                        "TreeTrunk",
+                        distant.transform,
+                        new Vector3(0f, 0.5f, 0f),
+                        new Vector3(0.25f, 0.5f, 0.25f),
+                        matTrunk,
+                        true);
+
+                    MakePrimitive(
+                        PrimitiveType.Sphere,
+                        "TreeFoliage",
+                        distant.transform,
+                        new Vector3(0f, 1.2f, 0f),
+                        new Vector3(1.4f, 1.4f, 1.4f),
+                        matGrass,
+                        true);
+                }
             }
         }
 

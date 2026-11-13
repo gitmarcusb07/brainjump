@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using BrainJump;
 using UnityEditor;
@@ -7,6 +8,20 @@ namespace BrainJump.Editor
 {
     public static partial class SceneBuilder
     {
+        /// <summary>
+        /// Coins placed along the jump paths towards each answer platform during the last build.
+        /// </summary>
+        internal static List<Coin> BuiltCoins;
+
+        /// <summary>
+        /// The single pooled (initially inactive) power-up pickup created during the last build.
+        /// </summary>
+        internal static PowerUpPickup BuiltPowerUpPickup;
+
+        /// <summary>
+        /// Builds the player hero, spawn point, camera, coins, power-up pickup and island decor,
+        /// then saves the player and answer platform prefabs.
+        /// </summary>
         internal static void BuildPlayerCameraAndDecor()
         {
             Material matOffWhite = AssetDatabase.LoadAssetAtPath<Material>("Assets/BrainJump/Materials/Mat_OffWhite.mat");
@@ -18,6 +33,12 @@ namespace BrainJump.Editor
             Material matCrystal = AssetDatabase.LoadAssetAtPath<Material>("Assets/BrainJump/Materials/Mat_Crystal.mat");
             Material matCloud = AssetDatabase.LoadAssetAtPath<Material>("Assets/BrainJump/Materials/Mat_Cloud.mat");
             Material matRock = AssetDatabase.LoadAssetAtPath<Material>("Assets/BrainJump/Materials/Mat_Rock.mat");
+
+            if (matOffWhite == null || matDark == null || matGold == null || matCoral == null ||
+                matTrunk == null || matGrass == null || matCrystal == null || matCloud == null || matRock == null)
+            {
+                Debug.LogWarning("SceneBuilder: one or more materials in Assets/BrainJump/Materials could not be loaded. Affected objects will use the default material.");
+            }
 
             Vector3 spawnPosition = new Vector3(0f, 0.1f, -2.5f);
 
@@ -88,6 +109,34 @@ namespace BrainJump.Editor
             eyeR.transform.localPosition = new Vector3(0.2f, 1.8f, 0.48f);
             eyeR.transform.localRotation = Quaternion.identity;
 
+            // Face detail: cheeks and hair tuft (looked up by name in CharacterAnimator).
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "CheekL",
+                visual.transform,
+                new Vector3(-0.34f, 1.68f, 0.42f),
+                new Vector3(0.16f, 0.12f, 0.08f),
+                matCoral,
+                true);
+
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "CheekR",
+                visual.transform,
+                new Vector3(0.34f, 1.68f, 0.42f),
+                new Vector3(0.16f, 0.12f, 0.08f),
+                matCoral,
+                true);
+
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "Tuft",
+                visual.transform,
+                new Vector3(0f, 2.32f, 0f),
+                new Vector3(0.3f, 0.22f, 0.3f),
+                matGold,
+                true);
+
             GameObject armL = MakePrimitive(
                 PrimitiveType.Capsule,
                 "ArmL",
@@ -132,8 +181,28 @@ namespace BrainJump.Editor
             legR.transform.localPosition = new Vector3(0.22f, 0.25f, 0f);
             legR.transform.localRotation = Quaternion.identity;
 
+            // Shoes: flattened dark spheres parented to each leg.
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "Shoe",
+                legL.transform,
+                new Vector3(0f, -0.22f, 0.08f),
+                new Vector3(0.32f, 0.14f, 0.42f),
+                matDark,
+                true);
+
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "Shoe",
+                legR.transform,
+                new Vector3(0f, -0.22f, 0.08f),
+                new Vector3(0.32f, 0.14f, 0.42f),
+                matDark,
+                true);
+
             player.AddComponent<PlayerController>();
             player.AddComponent<CharacterAnimator>();
+            player.AddComponent<PlayerTrail>();
 
             BuiltPlayer = player;
 
@@ -175,6 +244,79 @@ namespace BrainJump.Editor
             cameraFollow.SnapToTarget();
             BuiltCameraFollow = cameraFollow;
 
+            // Coins along the jump arc towards each answer platform.
+            GameObject coinsRoot = new GameObject("Coins");
+            coinsRoot.transform.position = Vector3.zero;
+            coinsRoot.transform.rotation = Quaternion.identity;
+
+            List<Coin> builtCoins = new List<Coin>();
+
+            if (BuiltPlatforms != null && BuiltPlatforms.Count > 0)
+            {
+                foreach (AnswerPlatform platform in BuiltPlatforms)
+                {
+                    if (platform == null)
+                    {
+                        continue;
+                    }
+
+                    Vector3 platformPos = platform.transform.position;
+                    Vector3 start = new Vector3(platformPos.x * 0.3f, 1.4f, 2.0f);
+                    Vector3 end = new Vector3(platformPos.x, 1.2f, platformPos.z - 1.0f);
+
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float t = 0.25f + k * 0.25f;
+                        Vector3 pos = Vector3.Lerp(start, end, t);
+                        pos.y += Mathf.Sin(t * Mathf.PI) * 0.8f;
+
+                        GameObject coinGO = new GameObject("Coin");
+                        coinGO.transform.SetParent(coinsRoot.transform, false);
+                        coinGO.transform.localPosition = pos;
+
+                        GameObject coinVisual = MakePrimitive(
+                            PrimitiveType.Cylinder,
+                            "Visual",
+                            coinGO.transform,
+                            Vector3.zero,
+                            new Vector3(0.35f, 0.08f, 0.35f),
+                            matGold,
+                            true);
+                        coinVisual.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+                        SphereCollider trigger = coinGO.AddComponent<SphereCollider>();
+                        trigger.isTrigger = true;
+                        trigger.radius = 0.5f;
+
+                        Coin coin = coinGO.AddComponent<Coin>();
+                        builtCoins.Add(coin);
+                    }
+                }
+            }
+
+            BuiltCoins = builtCoins;
+
+            // Pooled power-up pickup (inactive until spawned at runtime).
+            GameObject powerUpGO = new GameObject("PowerUpPickup");
+            powerUpGO.transform.position = new Vector3(0f, 1.6f, 8.5f);
+
+            MakePrimitive(
+                PrimitiveType.Sphere,
+                "Visual",
+                powerUpGO.transform,
+                Vector3.zero,
+                new Vector3(0.5f, 0.5f, 0.5f),
+                matOffWhite,
+                true);
+
+            SphereCollider powerTrigger = powerUpGO.AddComponent<SphereCollider>();
+            powerTrigger.isTrigger = true;
+            powerTrigger.radius = 0.6f;
+
+            PowerUpPickup powerUpPickup = powerUpGO.AddComponent<PowerUpPickup>();
+            powerUpGO.SetActive(false);
+            BuiltPowerUpPickup = powerUpPickup;
+
             GameObject decorRoot = new GameObject("Decor");
             decorRoot.transform.position = Vector3.zero;
             decorRoot.transform.rotation = Quaternion.identity;
@@ -183,7 +325,9 @@ namespace BrainJump.Editor
             {
                 new Vector3(-3.5f, 0f, -3.5f),
                 new Vector3(3.8f, 0f, -2.5f),
-                new Vector3(-4.0f, 0f, 1.5f)
+                new Vector3(-4.0f, 0f, 1.5f),
+                new Vector3(4.2f, 0f, 2.8f),
+                new Vector3(-2.0f, 0f, -4.2f)
             };
 
             for (int i = 0; i < treePositions.Length; i++)
@@ -221,13 +365,17 @@ namespace BrainJump.Editor
                     true);
             }
 
-            float[] flowerAngles = { 20f, 70f, 110f, 160f, 200f, 250f, 290f, 340f };
+            float[] flowerAngles = { 20f, 70f, 110f, 160f, 200f, 250f, 290f, 340f, 40f, 130f, 230f, 310f };
             Material[] flowerMaterials =
             {
                 matCoral,
                 matGold,
                 matOffWhite,
                 matCoral,
+                matGold,
+                matOffWhite,
+                matCoral,
+                matGold,
                 matGold,
                 matOffWhite,
                 matCoral,
@@ -256,14 +404,18 @@ namespace BrainJump.Editor
             {
                 new Vector3(-4.2f, 0.5f, -1f),
                 new Vector3(4.2f, 0.5f, 0.5f),
-                new Vector3(0f, 0.5f, -4.3f)
+                new Vector3(0f, 0.5f, -4.3f),
+                new Vector3(2.0f, 0.5f, -4.0f),
+                new Vector3(-1.5f, 0.5f, 4.2f)
             };
 
             Quaternion[] crystalRotations =
             {
                 Quaternion.Euler(0f, 20f, 12f),
                 Quaternion.Euler(8f, 55f, -10f),
-                Quaternion.Euler(-6f, 85f, 14f)
+                Quaternion.Euler(-6f, 85f, 14f),
+                Quaternion.Euler(4f, 30f, -8f),
+                Quaternion.Euler(-10f, 70f, 6f)
             };
 
             for (int i = 0; i < crystalPositions.Length; i++)
